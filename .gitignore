@@ -1,0 +1,5 @@
+*.pyc
+*.whl
+*.zst
+*~
+__pycache__
