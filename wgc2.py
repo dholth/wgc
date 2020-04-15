@@ -20,6 +20,8 @@ from pathlib import Path
 from wheel.util import urlsafe_b64encode
 from wheel.wheelfile import WheelFile, get_zipinfo_datetime
 
+compresslevel = "3"
+
 
 class HW2(io.BufferedIOBase):
     """
@@ -71,7 +73,7 @@ class Wheel2File(WheelFile):
                     return
                 closed = True
                 original()
-                subprocess.call(["zstd", "-10", temp.name])
+                subprocess.call(["zstd", f"-{compresslevel}", temp.name])
                 lines = open(temp.name + ".zst", "rb").readlines()
                 data_writer.writelines(lines)
                 os.unlink(temp.name)
@@ -114,6 +116,36 @@ def recompress(infile, outfile):
                 with inner_zip.open(info, "w") as foo:
                     foo.write(data)
             inner_zip.close()
+
+        for info in dist_info:
+            if info.filename == record_path:
+                continue
+            with wheel_in.open(info, "r") as readable:
+                data = readable.read()
+            info.compress_type = zipfile.ZIP_DEFLATED
+            with wheel_out.open(info, "w") as target:
+                target.write(data)
+
+
+def rewrite(infile, outfile):
+    """
+    For timing comparison with the nested zip strategy.
+    """
+    with WheelFile(infile) as wheel_in, Wheel2File(outfile, "w") as wheel_out:
+        dist_info = []
+        record_path = wheel_out.dist_info_path + "/RECORD"
+
+        inner_zip = wheel_out
+        if True:
+            for info in wheel_in.infolist():
+                if info.filename.startswith(wheel_out.dist_info_path):
+                    dist_info.append(info)
+                    continue
+                with wheel_in.open(info, "r") as readable:
+                    data = readable.read()
+                info.compress_type = zipfile.ZIP_DEFLATED
+                with inner_zip.open(info, "w") as foo:
+                    foo.write(data)
 
         for info in dist_info:
             if info.filename == record_path:
