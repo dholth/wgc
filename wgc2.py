@@ -20,7 +20,7 @@ from pathlib import Path
 from wheel.util import urlsafe_b64encode
 from wheel.wheelfile import WheelFile, get_zipinfo_datetime
 
-compresslevel = "3"
+compresslevel = "19"
 
 
 class HW2(io.BufferedIOBase):
@@ -55,11 +55,21 @@ class Wheel2File(WheelFile):
         """
         Return inner zip for writing.
         """
-        zip_name = self.data_path + ".zip.zst"
+        use_zstd = True
+
+        # the outer zip member may be stored or use standard compression
+        if use_zstd:
+            zip_name = self.data_path + ".zip.zst"
+        else:
+            zip_name = self.data_path + ".zip"
         zip_info = zipfile.ZipInfo(zip_name, date_time=get_zipinfo_datetime())
-        zip_info.compress_type = zipfile.ZIP_STORED
+        zip_info.compress_type = (
+            zipfile.ZIP_STORED if use_zstd else zipfile.ZIP_DEFLATED
+        )
         data_writer = self.open(zip_info, "w")
         temp = tempfile.NamedTemporaryFile(delete=False)
+
+        # the inner zip is always STORED
         complete = zipfile.ZipFile(temp.name, mode="w", compression=zipfile.ZIP_STORED)
 
         def closer(original):
@@ -73,11 +83,15 @@ class Wheel2File(WheelFile):
                     return
                 closed = True
                 original()
-                subprocess.call(["zstd", f"-{compresslevel}", temp.name])
-                lines = open(temp.name + ".zst", "rb").readlines()
-                data_writer.writelines(lines)
+                if use_zstd:  # zstd mode
+                    subprocess.call(["zstd", "-T0", f"-{compresslevel}", temp.name])
+                    lines = open(temp.name + ".zst", "rb").readlines()
+                    data_writer.writelines(lines)
+                    os.unlink(temp.name + ".zst")
+                else:  # regular zip compression
+                    # use copyfileobj?
+                    data_writer.write(open(temp.name, "rb").read())
                 os.unlink(temp.name)
-                os.unlink(temp.name + ".zst")
                 data_writer.close()
 
             return close
