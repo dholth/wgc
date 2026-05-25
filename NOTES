@@ -1,0 +1,34 @@
+Wheel data model (category, file path) interface where category is ROOT
+or data, platlib, purelib or maybe None or '' for the ROOT category.
+
+file path is the path, without the prefix in wheel that labels its
+category. <name>-<version>.data/platlib/<file path>
+
+Move it to an inner tarfile that's as streaming as possible. Possible to
+go data -> tar -> hasher -> zip writer to collect our RECORD hash. Or,
+wheel archive automatically hashes all incoming data.
+
+Collect all of the original wheel's dist-info probably in RAM? because
+we can't write them while the streaming inner-tarfile is also open.
+
+Then those zipinfo's get written into the new zip.
+
+It's very possible that if we call the new file
+`name-version.data.tar.zst` then an extracter might look for
+name-version.data<category>
+
+But it probably looks for *.data/<category>/files so the slash prevents
+those kinds of problems...
+
+
+Zip can write CRC etc. after file data instead of in local header, for less
+seeks while writing. But then we have the problem of not knowing the compressed
+size without consulting the compression format, or the central directory header
+and the footer for the file.
+
+# Write updated header info
+if self._zinfo.flag_bits & _MASK_USE_DATA_DESCRIPTOR:
+    # Write CRC and file sizes after the file data
+
+See ZipInfo.FileHeader() for the header that goes before each file in the
+archive, in addition to the file list at the end.
