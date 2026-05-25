@@ -5,24 +5,12 @@ Layered wheel implementation
 
 import base64
 import csv
+import email.policy
 import hashlib
 import io
-import pprint
-import re
-import shutil
-import subprocess
 import zipfile
 
-import email.policy
-
-
-# Non-greedy matching of an optional build number may be too clever (more
-# invalid wheel filenames will match). Separate regex for .dist-info?
-WHEEL_INFO_RE = re.compile(
-    r"""^(?P<namever>(?P<name>.+?)-(?P<ver>.+?))(-(?P<build>\d[^-]*))?
-     -(?P<pyver>.+?)-(?P<abi>.+?)-(?P<plat>.+?)\.whl$""",
-    re.VERBOSE,
-)
+from packaging.utils import parse_wheel_filename
 
 
 class HashStream(io.BufferedIOBase):
@@ -33,7 +21,7 @@ class HashStream(io.BufferedIOBase):
     """
 
     # blake2b 11.39s vs sha256 11.75s vs passthrough 7.68s
-    def __init__(self, backing: io.BufferedIOBase, callback, algo="blake2s"):
+    def __init__(self, backing: io.BufferedIOBase, callback, algo="sha256"):
         super().__init__()
         self.backing = backing
         self.length = 0
@@ -90,7 +78,10 @@ class WheelArchiver(zipfile.ZipFile):
     def __init__(self, *args, namever=None, **kwargs):
         super().__init__(*args, **kwargs)
         if namever is None and self.filename:
-            namever = WHEEL_INFO_RE.match(self.filename).group("namever")
+            from pathlib import Path
+
+            name, ver, *_ = parse_wheel_filename(Path(self.filename).name)
+            namever = f"{name}-{ver}"
         self.namever = namever
         self._file_hashes = {}  # if mode = 'r' initialize from RECORD
         self._file_sizes = {}

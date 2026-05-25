@@ -3,22 +3,23 @@
 # puts everything but *.dist-info/ in an interior archive
 # requires wheel >= 0.34.2
 
-import sys
 import argparse
-import os.path
-import pathlib
-import zipfile
-import threading
-import tempfile
-import subprocess
-
-import io
 import hashlib
-
-from zipfile import ZipFile
+import io
+import os
+import os.path
+import subprocess
+import tarfile
+import tempfile
+import zipfile
 from pathlib import Path
-from wheel.util import urlsafe_b64encode
+from zipfile import ZipFile
+
+from compression.zstd import CompressionParameter, ZstdFile
 from wheel.wheelfile import WheelFile, get_zipinfo_datetime
+
+# from packaging.utils import parse_wheel_filename
+from wheelfile import WheelArchiver, urlsafe_b64encode
 
 compresslevel = "19"
 
@@ -46,10 +47,44 @@ class HW2(io.BufferedIOBase):
         return self.backing.close()
 
 
-class Wheel2File(WheelFile):
+class Wheel2File(WheelArchiver):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.data_path = "{}.data".format(self.parsed_filename.group("namever"))
+        self.data_path = "{}.data".format(self.namever)
+
+    @property
+    def dist_info_path(self):
+        return self.dist_info
+
+    def data_tar(self):
+        """
+        Return inner tar for writing.
+        """
+        zip_name = self.data_path + ".tar.zst"
+        zip_info = zipfile.ZipInfo(zip_name, date_time=get_zipinfo_datetime())
+        zip_info.compress_type = zipfile.ZIP_STORED
+        data_writer = self.open(zip_info, "w")
+        # If wrapping an existing file object, the wrapped file will
+        # not be closed when the ZstdFile is closed.
+        zst_writer = ZstdFile(
+            data_writer,
+            "w",
+            options={
+                CompressionParameter.compression_level: 19,
+                CompressionParameter.nb_workers: os.cpu_count() or 1,
+            },
+        )
+
+        class ClosingTarFile(tarfile.TarFile):
+            """Close wrapped fileobj's when closed, unlike TarFile, ZstdFile."""
+
+            def close(self) -> None:
+                super().close()
+                zst_writer.close()
+                data_writer.close()
+
+        tar_writer = ClosingTarFile(None, "w", zst_writer, format=tarfile.PAX_FORMAT)
+        return tar_writer
 
     def data_zip(self):
         """
@@ -130,6 +165,32 @@ def recompress(infile, outfile):
                 with inner_zip.open(info, "w") as foo:
                     foo.write(data)
             inner_zip.close()
+
+        for info in dist_info:
+            if info.filename == record_path:
+                continue
+            with wheel_in.open(info, "r") as readable:
+                data = readable.read()
+            info.compress_type = zipfile.ZIP_DEFLATED
+            with wheel_out.open(info, "w") as target:
+                target.write(data)
+
+
+def recompress_tar(infile, outfile):
+    with WheelFile(infile) as wheel_in, Wheel2File(outfile, "w") as wheel_out:
+        dist_info = []
+        record_path = wheel_out.dist_info_path + "/RECORD"
+        with wheel_out.data_tar() as inner_tar:
+            for info in wheel_in.infolist():
+                if info.filename.startswith(wheel_out.dist_info_path):
+                    dist_info.append(info)
+                    continue
+                with wheel_in.open(info, "r") as readable:
+                    data = readable.read()
+                # XXX discards execute bit, file permissions
+                tar_info = tarfile.TarInfo(name=info.filename)
+                tar_info.size = len(data)
+                inner_tar.addfile(tar_info, io.BytesIO(data))
 
         for info in dist_info:
             if info.filename == record_path:
