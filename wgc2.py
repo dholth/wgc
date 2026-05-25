@@ -16,7 +16,7 @@ from pathlib import Path
 from zipfile import ZipFile
 
 from compression.zstd import CompressionParameter, ZstdFile
-from wheel.wheelfile import WheelFile, get_zipinfo_datetime
+from wheel.wheelfile import WheelFile
 
 # from packaging.utils import parse_wheel_filename
 from wheelfile import WheelArchiver, urlsafe_b64encode
@@ -61,9 +61,11 @@ class Wheel2File(WheelArchiver):
         Return inner tar for writing.
         """
         zip_name = self.data_path + ".tar.zst"
-        zip_info = zipfile.ZipInfo(zip_name, date_time=get_zipinfo_datetime())
+        zip_info = zipfile.ZipInfo(
+            zip_name
+        )  # default minimum zip datetime (1980, 1, 1, 00:00)
         zip_info.compress_type = zipfile.ZIP_STORED
-        data_writer = self.open(zip_info, "w")
+        data_writer = self.open(zip_info, "w", force_zip64=True)
         # If wrapping an existing file object, the wrapped file will
         # not be closed when the ZstdFile is closed.
         zst_writer = ZstdFile(
@@ -97,7 +99,9 @@ class Wheel2File(WheelArchiver):
             zip_name = self.data_path + ".zip.zst"
         else:
             zip_name = self.data_path + ".zip"
-        zip_info = zipfile.ZipInfo(zip_name, date_time=get_zipinfo_datetime())
+        zip_info = zipfile.ZipInfo(
+            zip_name
+        )  # default minimum zip datetime (1980, 1, 1, 00:00)
         zip_info.compress_type = (
             zipfile.ZIP_STORED if use_zstd else zipfile.ZIP_DEFLATED
         )
